@@ -1,0 +1,11 @@
+.DS_Store
+.idea/
+ckpt/
+data/
+snapshots/
+venv/
+*/*.pyc
+*/**/*.pyc
+*/**/**/*.pyc
+*/**/**/**/*.pyc
+*/**/**/**/**/*.pyce

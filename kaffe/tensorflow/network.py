@@ -32,7 +32,7 @@ def layer(op):
 
 class Network(object):
 
-    def __init__(self, inputs, trainable=True, is_training=False, num_classes=21):
+    def __init__(self, inputs, trainable=True, is_training=False, num_classes=21, embedding_size=2048, ASPP=True, CRN=False):
         # The input nodes for this network
         self.inputs = inputs
         # The current list of terminal nodes
@@ -45,7 +45,7 @@ class Network(object):
         self.use_dropout = tf.placeholder_with_default(tf.constant(1.0),
                                                        shape=[],
                                                        name='use_dropout')
-        self.setup(is_training, num_classes)
+        self.setup(is_training, num_classes, embedding_size, ASPP, CRN)
 
     def setup(self, is_training):
         '''Construct the network. '''
@@ -273,3 +273,53 @@ class Network(object):
     def dropout(self, input, keep_prob, name):
         keep = 1 - self.use_dropout + (self.use_dropout * keep_prob)
         return tf.nn.dropout(input, keep, name=name)
+
+    @layer
+    def crn(self, input, num_classes, embedding_size, name,
+        conditional_layer='conv',
+        conv_filter_height=3,
+        conv_filter_width=3,
+        num_layers=1, final_project=False,
+        key_value=False, skip_connection=False,
+        weight_sharing=False):
+        with tf.variable_scope(name) as scope:
+            # [c, e]
+            class_embeddings = tf.get_variable("class_embeddings", dtype=tf.float32,
+                                           shape=[num_classes, embedding_size])
+            # = h, w
+            input_shape = input.get_shape().as_list()
+            input_h = input_shape[1]
+            input_w = input_shape[2]
+            sequence_length = input_h * input_w
+
+            # [b * n, e]
+            encoder_outputs_reshaped = tf.reshape(input, [-1, embedding_size])
+            # [b * n, e] x [e, c] = [b * n, c]
+            scores_r = tf.matmul(encoder_outputs_reshaped, tf.transpose(class_embeddings))
+            # [b, n, c]
+            scores_r = tf.reshape(scores_r, [-1, sequence_length, num_classes])
+            # [b, n, c]
+            attentions = tf.nn.softmax(scores_r)
+
+            # [b, n, c]
+            attentions = tf.expand_dims(attentions, axis=-1)
+            # [b, n, c, e]
+            attentions_t = tf.tile(attentions, [1, 1, 1, embedding_size])
+            # [b, n, c, e] * [c, e] = [b. n. c. e]
+            weighted_class_embeddings = class_embeddings * attentions_t
+            # reducing over c, [b, n, e]
+            class_proposals = tf.reduce_sum(weighted_class_embeddings, axis=-2)
+
+            # [b, h, w, e]
+            class_proposals_reshaped = tf.reshape(class_proposals, [-1, input_h, input_w, embedding_size])
+            # [k, k, e, e]
+            conv_filters = tf.get_variable("conv_filter", shape=[conv_filter_height, conv_filter_width, embedding_size, embedding_size])
+            # [b, h, w, e]
+            refined_outputs = tf.nn.conv2d(
+                class_proposals_reshaped,
+                conv_filters,
+                strides=[1,1,1,1],
+                padding='SAME'
+            )
+
+        return refined_outputs
