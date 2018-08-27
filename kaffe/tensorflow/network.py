@@ -291,27 +291,37 @@ class Network(object):
             input_h = input_shape[1]
             input_w = input_shape[2]
             sequence_length = input_h * input_w
+            print("input_shape", input_shape)
 
             # [b * n, e]
             encoder_outputs_reshaped = tf.reshape(input, [-1, embedding_size])
+            print("encoder_outputs_reshaped", encoder_outputs_reshaped.get_shape().as_list())
             # [b * n, e] x [e, c] = [b * n, c]
             scores_r = tf.matmul(encoder_outputs_reshaped, tf.transpose(class_embeddings))
+            print("scores_r", scores_r.get_shape().as_list())
             # [b, n, c]
             scores_r = tf.reshape(scores_r, [-1, sequence_length, num_classes])
+            print("scores_r", scores_r.get_shape().as_list())
             # [b, n, c]
             attentions = tf.nn.softmax(scores_r)
+            print("attentions", attentions.get_shape().as_list())
 
             # [b, n, c]
             attentions = tf.expand_dims(attentions, axis=-1)
+            print("attentions", attentions.get_shape().as_list())
             # [b, n, c, e]
             attentions_t = tf.tile(attentions, [1, 1, 1, embedding_size])
+            print("attentions_t", attentions_t.get_shape().as_list())
             # [b, n, c, e] * [c, e] = [b. n. c. e]
             weighted_class_embeddings = class_embeddings * attentions_t
+            print("weighted_class_embeddings", weighted_class_embeddings.get_shape().as_list())
             # reducing over c, [b, n, e]
             class_proposals = tf.reduce_sum(weighted_class_embeddings, axis=-2)
+            print("class_proposals", class_proposals.get_shape().as_list())
 
             # [b, h, w, e]
             class_proposals_reshaped = tf.reshape(class_proposals, [-1, input_h, input_w, embedding_size])
+            print("class_proposals_reshaped", class_proposals_reshaped.get_shape().as_list())
             # [k, k, e, e]
             conv_filters = tf.get_variable("conv_filter", shape=[conv_filter_height, conv_filter_width, embedding_size, embedding_size])
             # [b, h, w, e]
@@ -321,5 +331,6 @@ class Network(object):
                 strides=[1,1,1,1],
                 padding='SAME'
             )
+            print("refined_outputs", refined_outputs.get_shape().as_list())
 
         return refined_outputs

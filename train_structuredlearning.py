@@ -20,22 +20,26 @@ from deeplab_resnet import DeepLabResNetStructuredLearningModel, ImageReader, de
 
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
-BATCH_SIZE = 2
-DATA_DIRECTORY = './data/VOC2012_Aug/VOCdevkit'
-DATA_LIST_PATH = './dataset/small_batch.txt'
+BATCH_SIZE = 4
+DATA_DIRECTORY = './data/VOC2012_Aug/VOCdevkit/VOC2012'
+DATA_LIST_PATH = './dataset/train.txt'
 IGNORE_LABEL = 255
 INPUT_SIZE = '321,321'
 LEARNING_RATE = 2.5e-4
 MOMENTUM = 0.9
 NUM_CLASSES = 21
-NUM_STEPS = 5 #20001
+NUM_STEPS = 20001
 POWER = 0.9
 RANDOM_SEED = 1234
-RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet.ckpt'
+RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet_init.ckpt'
 SAVE_NUM_IMAGES = 2
 SAVE_PRED_EVERY = 1000
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
+GPU_ID = '0'
+EMBEDDING_SIZE = 512
+ASPP = True
+CRN = True
 
 
 def get_arguments():
@@ -85,13 +89,13 @@ def get_arguments():
                         help="Where to save snapshots of the model.")
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY,
                         help="Regularisation parameter for L2-loss.")
-    parser.add_argument("--gpu-id", type=str, default="-1",
+    parser.add_argument("--gpu-id", type=str, default=GPU_ID,
                         help="GPU id, -1 means cpu.")
-    parser.add_argument("--embedding-size", type=int, default=2048,
+    parser.add_argument("--embedding-size", type=int, default=EMBEDDING_SIZE,
                         help="embedding-size before refinement.")
-    parser.add_argument("--ASPP", type=bool, default=True,
+    parser.add_argument("--ASPP", type=bool, default=ASPP,
                         help="Whether use Atrous Spatial Pyramid Pooling")
-    parser.add_argument("--CRN", type=bool, default=True,
+    parser.add_argument("--CRN", type=bool, default=CRN,
                         help="Wether use CRN to refine output")
 
     return parser.parse_args()
@@ -166,15 +170,18 @@ def main():
 
     # Predictions.
     crn_output = net.layers['crn']
+    print("crn_output", crn_output.get_shape().as_list())
     with tf.variable_scope("crn", reuse=True):
         class_embeddings = tf.get_variable("class_embeddings")  # reuse
     output_shape = crn_output.get_shape().as_list()
     output_h = output_shape[1]
     output_w = output_shape[2]
     crn_output_reshaped = tf.reshape(crn_output, [-1, args.embedding_size])
+    print("crn_output_reshaped", crn_output_reshaped.get_shape().as_list())
     raw_output = tf.matmul(crn_output_reshaped, tf.transpose(class_embeddings))
+    print("raw_output", raw_output.get_shape().as_list())
     raw_output = tf.reshape(raw_output, [-1, output_h, output_w, args.num_classes])
-
+    print("raw_output", raw_output.get_shape().as_list())
 
     # Which variables to load. Running means and variances are not trainable,
     # thus all_variables() should be restored.
