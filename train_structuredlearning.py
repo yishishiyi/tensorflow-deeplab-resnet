@@ -20,7 +20,7 @@ from deeplab_resnet import DeepLabResNetStructuredLearningModel, ImageReader, de
 
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
-BATCH_SIZE = 4
+BATCH_SIZE = 1
 DATA_DIRECTORY = './data/VOC2012_Aug/VOCdevkit/VOC2012'
 DATA_LIST_PATH = './dataset/train.txt'
 IGNORE_LABEL = 255

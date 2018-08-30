@@ -3,6 +3,7 @@
 ckpt/
 data/
 snapshots/
+snapshots*/
 venv/
 */*.pyc
 */**/*.pyc
