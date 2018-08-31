@@ -34,6 +34,7 @@ RANDOM_SEED = 1234
 RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet_init.ckpt'
 SAVE_NUM_IMAGES = 1
 SAVE_PRED_EVERY = 1000
+SUMMARY_EVERY = 20
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
 GPU_ID = '0'
@@ -84,7 +85,9 @@ def get_arguments():
     parser.add_argument("--save-num-images", type=int, default=SAVE_NUM_IMAGES,
                         help="How many images to save.")
     parser.add_argument("--save-pred-every", type=int, default=SAVE_PRED_EVERY,
-                        help="Save summaries and checkpoint every often.")
+                        help="Save checkpoint every often.")
+    parser.add_argument("--summary-every", type=int, default=SUMMARY_EVERY,
+                        help="Save summaries every often.")
     parser.add_argument("--snapshot-dir", type=str, default=SNAPSHOT_DIR,
                         help="Where to save snapshots of the model.")
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY,
@@ -294,14 +297,16 @@ def main():
         start_time = time.time()
         feed_dict = {step_ph: step}
 
-        if step % args.save_pred_every == 0:
+        if step % args.summary_every == 0:
             loss_value, images, labels, preds, summary, _ = sess.run(
                 [reduced_loss, image_batch, label_batch, pred, summary_op, train_op], feed_dict=feed_dict)
             summary_writer.add_summary(summary, step)
-            save(saver, sess, args.snapshot_dir, step)
         else:
             loss_value, _ = sess.run([reduced_loss, train_op], feed_dict=feed_dict)
         duration = time.time() - start_time
+
+        if step % args.save_pred_every ==0:
+            save(saver, sess, args.snapshot_dir, step)
         print('step {:d} \t loss = {:.3f}, ({:.3f} sec/step)'.format(step, loss_value, duration))
 
     coord.request_stop()
