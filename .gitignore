@@ -2,8 +2,7 @@
 .idea/
 ckpt/
 data/
-snapshots/
-snapshots*/
+logs/
 venv/
 */*.pyc
 */**/*.pyc
