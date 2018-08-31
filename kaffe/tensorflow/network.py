@@ -45,6 +45,7 @@ class Network(object):
         self.use_dropout = tf.placeholder_with_default(tf.constant(1.0),
                                                        shape=[],
                                                        name='use_dropout')
+        self.tensor_to_summary = {}
         self.setup(is_training, num_classes, embedding_size, ASPP, CRN)
 
     def setup(self, is_training):
@@ -332,5 +333,9 @@ class Network(object):
                 padding='SAME'
             )
             print("refined_outputs", refined_outputs.get_shape().as_list())
+
+            self.tensor_to_summary["attentions"] = attentions
+            self.tensor_to_summary["class_proposals_reshaped"] = class_proposals_reshaped
+            self.tensor_to_summary["refined_outputs"] = refined_outputs
 
         return refined_outputs

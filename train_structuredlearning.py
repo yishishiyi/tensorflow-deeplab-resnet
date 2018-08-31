@@ -32,7 +32,7 @@ NUM_STEPS = 20001
 POWER = 0.9
 RANDOM_SEED = 1234
 RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet_init.ckpt'
-SAVE_NUM_IMAGES = 2
+SAVE_NUM_IMAGES = 1
 SAVE_PRED_EVERY = 1000
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
@@ -169,19 +169,22 @@ def main():
     # if they are presented in var_list of the optimiser definition.
 
     # Predictions.
-    crn_output = net.layers['crn']
-    print("crn_output", crn_output.get_shape().as_list())
-    with tf.variable_scope("crn", reuse=True):
-        class_embeddings = tf.get_variable("class_embeddings")  # reuse
-    output_shape = crn_output.get_shape().as_list()
-    output_h = output_shape[1]
-    output_w = output_shape[2]
-    crn_output_reshaped = tf.reshape(crn_output, [-1, args.embedding_size])
-    print("crn_output_reshaped", crn_output_reshaped.get_shape().as_list())
-    raw_output = tf.matmul(crn_output_reshaped, tf.transpose(class_embeddings))
-    print("raw_output", raw_output.get_shape().as_list())
-    raw_output = tf.reshape(raw_output, [-1, output_h, output_w, args.num_classes])
-    print("raw_output", raw_output.get_shape().as_list())
+    if args.CRN:
+        crn_output = net.layers['crn']
+        print("crn_output", crn_output.get_shape().as_list())
+        with tf.variable_scope("crn", reuse=True):
+            class_embeddings = tf.get_variable("class_embeddings")  # reuse
+        output_shape = crn_output.get_shape().as_list()
+        output_h = output_shape[1]
+        output_w = output_shape[2]
+        crn_output_reshaped = tf.reshape(crn_output, [-1, args.embedding_size])
+        print("crn_output_reshaped", crn_output_reshaped.get_shape().as_list())
+        raw_output = tf.matmul(crn_output_reshaped, tf.transpose(class_embeddings))
+        print("raw_output", raw_output.get_shape().as_list())
+        raw_output = tf.reshape(raw_output, [-1, output_h, output_w, args.num_classes])
+        print("raw_output", raw_output.get_shape().as_list())
+    else:
+        raw_output = net.layers['fc1_voc12']
 
     # Which variables to load. Running means and variances are not trainable,
     # thus all_variables() should be restored.
@@ -191,6 +194,7 @@ def main():
     conv_trainable = [v for v in all_trainable if 'fc' not in v.name]  # lr * 1.0
     fc_w_trainable = [v for v in fc_trainable if 'weights' in v.name]  # lr * 10.0
     fc_b_trainable = [v for v in fc_trainable if 'biases' in v.name]  # lr * 20.0
+    crn_trainable = [v for v in tf.trainable_variables() if 'crn' in v.name]
     assert (len(all_trainable) == len(fc_trainable) + len(conv_trainable))
     assert (len(fc_trainable) == len(fc_w_trainable) + len(fc_b_trainable))
 
@@ -213,17 +217,6 @@ def main():
     raw_output_up = tf.argmax(raw_output_up, dimension=3)
     pred = tf.expand_dims(raw_output_up, dim=3)
 
-    # Image summary.
-    images_summary = tf.py_func(inv_preprocess, [image_batch, args.save_num_images, IMG_MEAN], tf.uint8)
-    labels_summary = tf.py_func(decode_labels, [label_batch, args.save_num_images, args.num_classes], tf.uint8)
-    preds_summary = tf.py_func(decode_labels, [pred, args.save_num_images, args.num_classes], tf.uint8)
-
-    total_summary = tf.summary.image('images',
-                                     tf.concat(axis=2, values=[images_summary, labels_summary, preds_summary]),
-                                     max_outputs=args.save_num_images)  # Concatenate row-wise.
-    summary_writer = tf.summary.FileWriter(args.snapshot_dir,
-                                           graph=tf.get_default_graph())
-
     # Define loss and optimisation parameters.
     base_lr = tf.constant(args.learning_rate)
     step_ph = tf.placeholder(dtype=tf.float32, shape=())
@@ -232,17 +225,50 @@ def main():
     opt_conv = tf.train.MomentumOptimizer(learning_rate, args.momentum)
     opt_fc_w = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
     opt_fc_b = tf.train.MomentumOptimizer(learning_rate * 20.0, args.momentum)
+    opt_crn = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
 
-    grads = tf.gradients(reduced_loss, conv_trainable + fc_w_trainable + fc_b_trainable)
+    grads = tf.gradients(reduced_loss, conv_trainable + fc_w_trainable + fc_b_trainable + crn_trainable)
     grads_conv = grads[:len(conv_trainable)]
     grads_fc_w = grads[len(conv_trainable): (len(conv_trainable) + len(fc_w_trainable))]
-    grads_fc_b = grads[(len(conv_trainable) + len(fc_w_trainable)):]
+    grads_fc_b = grads[(len(conv_trainable) + len(fc_w_trainable)): (len(conv_trainable) + len(fc_w_trainable) + len(fc_b_trainable))]
+    grads_opt_crn = grads[(len(conv_trainable) + len(fc_w_trainable) + len(fc_b_trainable)):]
 
     train_op_conv = opt_conv.apply_gradients(zip(grads_conv, conv_trainable))
     train_op_fc_w = opt_fc_w.apply_gradients(zip(grads_fc_w, fc_w_trainable))
     train_op_fc_b = opt_fc_b.apply_gradients(zip(grads_fc_b, fc_b_trainable))
+    train_op_crn = opt_crn.apply_gradients(zip(grads_opt_crn, crn_trainable))
 
-    train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b)
+    train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b, train_op_crn)
+
+    # Image summary.
+    images_summary = tf.py_func(inv_preprocess, [image_batch, args.save_num_images, IMG_MEAN], tf.uint8)
+    labels_summary = tf.py_func(decode_labels, [label_batch, args.save_num_images, args.num_classes], tf.uint8)
+    preds_summary = tf.py_func(decode_labels, [pred, args.save_num_images, args.num_classes], tf.uint8)
+
+    tf.summary.image('images',
+                     tf.concat(axis=2, values=[images_summary, labels_summary, preds_summary]),
+                     max_outputs=args.save_num_images)  # Concatenate row-wise.
+    # Loss summary.
+    tf.summary.scalar('TRAIN/loss', reduced_loss)
+    tf.summary.scalar('TRAIN/lr', learning_rate)
+
+    # Tensor summary.
+    tensor_to_summary = net.tensor_to_summary
+    tensor_to_summary['raw_outputs'] = raw_output
+    tensor_to_summary['predictions'] = prediction
+    for key, t in tensor_to_summary.items():
+        tf.summary.histogram('SCORE/' + t.op.name + '/' + key + '/scores', t)
+
+    # Activation summary.
+    variables_to_summary = fc_w_trainable + fc_b_trainable + crn_trainable
+    for v in variables_to_summary:
+        tf.summary.histogram('ACT/' + v.op.name + '/activations', v)
+        tf.summary.scalar('ACT/' + v.op.name + '/zero_fraction',
+                      tf.nn.zero_fraction(v))
+
+    summary_op = tf.summary.merge_all()
+    summary_writer = tf.summary.FileWriter(args.snapshot_dir,
+                                           graph=tf.get_default_graph())
 
     # Set up tf session and initialize variables.
     config = tf.ConfigProto()
@@ -270,13 +296,14 @@ def main():
 
         if step % args.save_pred_every == 0:
             loss_value, images, labels, preds, summary, _ = sess.run(
-                [reduced_loss, image_batch, label_batch, pred, total_summary, train_op], feed_dict=feed_dict)
+                [reduced_loss, image_batch, label_batch, pred, summary_op, train_op], feed_dict=feed_dict)
             summary_writer.add_summary(summary, step)
             save(saver, sess, args.snapshot_dir, step)
         else:
             loss_value, _ = sess.run([reduced_loss, train_op], feed_dict=feed_dict)
         duration = time.time() - start_time
         print('step {:d} \t loss = {:.3f}, ({:.3f} sec/step)'.format(step, loss_value, duration))
+
     coord.request_stop()
     coord.join(threads)
 
