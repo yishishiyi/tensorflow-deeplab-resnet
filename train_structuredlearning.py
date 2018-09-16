@@ -22,7 +22,8 @@ IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32
 
 BATCH_SIZE = 1
 DATA_DIRECTORY = './data/VOC2012_Aug/VOCdevkit/VOC2012'
-DATA_LIST_PATH = './dataset/train.txt'
+DATA_LIST_PATH = './dataset/small_batch.txt'
+VAL_DATA_LIST_PATH = './dataset/val_small_batch.txt'
 IGNORE_LABEL = 255
 INPUT_SIZE = '321,321'
 LEARNING_RATE = 2.5e-4
@@ -34,7 +35,7 @@ RANDOM_SEED = 1234
 RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet_init.ckpt'
 SAVE_NUM_IMAGES = 1
 SAVE_PRED_EVERY = 1000
-SUMMARY_EVERY = 20
+SUMMARY_EVERY = 2
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
 GPU_ID = '0'
@@ -55,6 +56,8 @@ def get_arguments():
     parser.add_argument("--data-dir", type=str, default=DATA_DIRECTORY,
                         help="Path to the directory containing the PASCAL VOC dataset.")
     parser.add_argument("--data-list", type=str, default=DATA_LIST_PATH,
+                        help="Path to the file listing the images in the dataset.")
+    parser.add_argument("--val-data-list", type=str, default=VAL_DATA_LIST_PATH,
                         help="Path to the file listing the images in the dataset.")
     parser.add_argument("--ignore-label", type=int, default=IGNORE_LABEL,
                         help="The index of the label to ignore during the training.")
@@ -158,9 +161,20 @@ def main():
             args.ignore_label,
             IMG_MEAN,
             coord)
+        val_reader = ImageReader(
+            args.data_dir,
+            args.val_data_list,
+            None,
+            False,
+            False,
+            args.ignore_label,
+            IMG_MEAN,
+            coord)
         image_batch, label_batch = reader.dequeue(args.batch_size)
-    print("image_batch", image_batch.get_shape().as_list())
-    print("label_batch", label_batch.get_shape().as_list())
+        val_image_batch, val_label_batch = tf.expand_dims(val_reader.image, dim=0), tf.expand_dims(val_reader.label, dim=0)
+        # val_image_batch, val_label_batch = val_reader.dequeue(args.batch_size) #(todo) why in evaluation code, it's not dequeue.
+        print("image_batch", image_batch.get_shape().as_list())
+        print("label_batch", label_batch.get_shape().as_list())
 
     # Create network.
     net = DeepLabResNetStructuredLearningModel({'data': image_batch}, is_training=args.is_training,
@@ -217,11 +231,19 @@ def main():
     print("indices", indices.get_shape().as_list())
     print("prediction", prediction.get_shape().as_list())
     print("gt", gt.get_shape().as_list())
+    val_label_proc = prepare_label(val_label_batch, tf.stack(raw_output.get_shape()[1:3]), num_classes=args.num_classes,
+                               one_hot=False)  # [batch_size, h, w]
+    val_raw_gt = tf.reshape(val_label_proc, [-1, ])
+    val_indices = tf.squeeze(tf.where(tf.less_equal(val_raw_gt, args.num_classes - 1)), 1)
+    val_gt = tf.cast(tf.gather(val_raw_gt, val_indices), tf.int32)
+
 
     # Pixel-wise softmax loss.
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=gt)
     l2_losses = [args.weight_decay * tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'weights' in v.name]
     reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
+    val_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=val_gt)
+    val_reduced_loss = tf.reduce_mean(val_loss) + tf.add_n(l2_losses)
 
     # Processed predictions: for visualisation.
     raw_output_up = tf.image.resize_bilinear(raw_output, tf.shape(image_batch)[1:3, ])
@@ -260,6 +282,7 @@ def main():
                      tf.concat(axis=2, values=[images_summary, labels_summary, preds_summary]),
                      max_outputs=args.save_num_images)  # Concatenate row-wise.
     # Loss summary.
+    tf.summary.scalar('TRAIN/loss', loss)
     tf.summary.scalar('TRAIN/loss', reduced_loss)
     tf.summary.scalar('TRAIN/lr', learning_rate)
 
@@ -277,9 +300,17 @@ def main():
         tf.summary.scalar('ACT/' + v.op.name + '/zero_fraction',
                       tf.nn.zero_fraction(v))
 
+    # validation summary, basic just loss summary
+    val_summaries = [tf.summary.scalar('TRAIN/loss', val_loss), tf.summary.scalar('TRAIN/loss', val_reduced_loss)]
+
     summary_op = tf.summary.merge_all()
+    val_summary_op = tf.summary.merge(val_summaries)
     summary_writer = tf.summary.FileWriter(args.snapshot_dir,
                                            graph=tf.get_default_graph())
+    val_snapshot_dir = args.snapshot_dir + '/val'
+    if not os.path.exists(val_snapshot_dir):
+      os.makedirs(val_snapshot_dir)
+    val_summary_writer = tf.summary.FileWriter(val_snapshot_dir)
 
     # Set up tf session and initialize variables.
     config = tf.ConfigProto()
@@ -309,6 +340,11 @@ def main():
             loss_value, images, labels, preds, summary, _ = sess.run(
                 [reduced_loss, image_batch, label_batch, pred, summary_op, train_op], feed_dict=feed_dict)
             summary_writer.add_summary(summary, step)
+
+            net.layers['data'] = val_image_batch
+            _, _, val_summary = sess.run([val_image_batch, val_label_batch, val_summary_op], feed_dict=feed_dict)
+            val_summary_writer.add_summary(val_summary, step)
+            net.layers['data'] = image_batch
         else:
             loss_value, _ = sess.run([reduced_loss, train_op], feed_dict=feed_dict)
         duration = time.time() - start_time
