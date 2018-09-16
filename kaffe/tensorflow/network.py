@@ -288,11 +288,9 @@ class Network(object):
             class_embeddings = tf.get_variable("class_embeddings", dtype=tf.float32,
                                            shape=[num_classes, embedding_size])
             # = h, w
-            input_shape = input.get_shape().as_list()
-            input_h = input_shape[1]
-            input_w = input_shape[2]
-            sequence_length = input_h * input_w
-            print("input_shape", input_shape)
+            input_shape = tf.shape(input)
+            sequence_length = input_shape[1] * input_shape[2]
+            print("input_shape", input.get_shape().as_list())
 
             # [b * n, e]
             encoder_outputs_reshaped = tf.reshape(input, [-1, embedding_size])
@@ -321,7 +319,8 @@ class Network(object):
             print("class_proposals", class_proposals.get_shape().as_list())
 
             # [b, h, w, e]
-            class_proposals_reshaped = tf.reshape(class_proposals, [-1, input_h, input_w, embedding_size])
+            reshape_size = tf.concat([input_shape[0:3], tf.constant([embedding_size], dtype=tf.int32)], axis=0, )
+            class_proposals_reshaped = tf.reshape(class_proposals, reshape_size)
             print("class_proposals_reshaped", class_proposals_reshaped.get_shape().as_list())
             # [k, k, e, e]
             conv_filters = tf.get_variable("conv_filter", shape=[conv_filter_height, conv_filter_width, embedding_size, embedding_size])

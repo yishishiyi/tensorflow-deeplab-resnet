@@ -159,6 +159,8 @@ def main():
             IMG_MEAN,
             coord)
         image_batch, label_batch = reader.dequeue(args.batch_size)
+    print("image_batch", image_batch.get_shape().as_list())
+    print("label_batch", label_batch.get_shape().as_list())
 
     # Create network.
     net = DeepLabResNetStructuredLearningModel({'data': image_batch}, is_training=args.is_training,
@@ -177,14 +179,13 @@ def main():
         print("crn_output", crn_output.get_shape().as_list())
         with tf.variable_scope("crn", reuse=True):
             class_embeddings = tf.get_variable("class_embeddings")  # reuse
-        output_shape = crn_output.get_shape().as_list()
-        output_h = output_shape[1]
-        output_w = output_shape[2]
+        output_shape = tf.shape(crn_output)
         crn_output_reshaped = tf.reshape(crn_output, [-1, args.embedding_size])
         print("crn_output_reshaped", crn_output_reshaped.get_shape().as_list())
         raw_output = tf.matmul(crn_output_reshaped, tf.transpose(class_embeddings))
         print("raw_output", raw_output.get_shape().as_list())
-        raw_output = tf.reshape(raw_output, [-1, output_h, output_w, args.num_classes])
+        reshape_size = tf.concat([output_shape[0:3], tf.constant([args.num_classes], dtype=tf.int32)], axis=0, )
+        raw_output = tf.reshape(raw_output, reshape_size)
         print("raw_output", raw_output.get_shape().as_list())
     else:
         raw_output = net.layers['fc1_voc12']
@@ -203,12 +204,19 @@ def main():
 
     # Predictions: ignoring all predictions with labels greater or equal than n_classes
     raw_prediction = tf.reshape(raw_output, [-1, args.num_classes])
-    label_proc = prepare_label(label_batch, tf.stack(raw_output.get_shape()[1:3]), num_classes=args.num_classes,
+    # tf.cast(tf.ceil(tf.shape(label_batch[1:3, ] / 8.0)), tf.int32)
+    label_proc = prepare_label(label_batch,tf.shape(raw_output)[1:3,], num_classes=args.num_classes,
                                one_hot=False)  # [batch_size, h, w]
     raw_gt = tf.reshape(label_proc, [-1, ])
     indices = tf.squeeze(tf.where(tf.less_equal(raw_gt, args.num_classes - 1)), 1)
     gt = tf.cast(tf.gather(raw_gt, indices), tf.int32)
     prediction = tf.gather(raw_prediction, indices)
+    print("raw_prediction", raw_prediction.get_shape().as_list())
+    print("label_proc", label_proc.get_shape().as_list())
+    print("raw_gt", raw_gt.get_shape().as_list())
+    print("indices", indices.get_shape().as_list())
+    print("prediction", prediction.get_shape().as_list())
+    print("gt", gt.get_shape().as_list())
 
     # Pixel-wise softmax loss.
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=gt)
