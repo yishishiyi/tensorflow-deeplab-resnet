@@ -32,7 +32,14 @@ def layer(op):
 
 class Network(object):
 
-    def __init__(self, inputs, trainable=True, is_training=False, num_classes=21, embedding_size=2048, ASPP=True, CRN=False):
+    def __init__(self, inputs, trainable=True, is_training=False, reuse=None, num_classes=21, embedding_size=2048, ASPP=True, CRN=False):
+        self.trainable = trainable
+        self.is_training = is_training
+        self.reuse = reuse
+        self.num_classes = num_classes
+        self.embedding_size = embedding_size
+        self.ASPP = ASPP
+        self.CRN = CRN
         # The input nodes for this network
         self.inputs = inputs
         # The current list of terminal nodes
@@ -46,7 +53,7 @@ class Network(object):
                                                        shape=[],
                                                        name='use_dropout')
         self.tensor_to_summary = {}
-        self.setup(is_training, num_classes, embedding_size, ASPP, CRN)
+        self.setup(is_training, num_classes)
 
     def setup(self, is_training):
         '''Construct the network. '''
@@ -115,7 +122,8 @@ class Network(object):
              relu=True,
              padding=DEFAULT_PADDING,
              group=1,
-             biased=True):
+             biased=True,
+             reuse=None):
         # Verify that the padding is acceptable
         self.validate_padding(padding)
         # Get the number of channels in the input
@@ -125,7 +133,7 @@ class Network(object):
         assert c_o % group == 0
         # Convolution for a given input and kernel
         convolve = lambda i, k: tf.nn.conv2d(i, k, [1, s_h, s_w, 1], padding=padding)
-        with tf.variable_scope(name) as scope:
+        with tf.variable_scope(name, reuse=reuse) as scope:
             kernel = self.make_var('weights', shape=[k_h, k_w, c_i / group, c_o])
             if group == 1:
                 # This is the common-case. Convolve the input without any further complications.
@@ -157,7 +165,8 @@ class Network(object):
                     relu=True,
                     padding=DEFAULT_PADDING,
                     group=1,
-                    biased=True):
+                    biased=True,
+                    reuse=None):
         # Verify that the padding is acceptable
         self.validate_padding(padding)
         # Get the number of channels in the input
@@ -167,7 +176,7 @@ class Network(object):
         assert c_o % group == 0
         # Convolution for a given input and kernel
         convolve = lambda i, k: tf.nn.atrous_conv2d(i, k, dilation, padding=padding)
-        with tf.variable_scope(name) as scope:
+        with tf.variable_scope(name, reuse=reuse) as scope:
             kernel = self.make_var('weights', shape=[k_h, k_w, c_i / group, c_o])
             if group == 1:
                 # This is the common-case. Convolve the input without any further complications.
@@ -228,8 +237,8 @@ class Network(object):
         return tf.add_n(inputs, name=name)
 
     @layer
-    def fc(self, input, num_out, name, relu=True):
-        with tf.variable_scope(name) as scope:
+    def fc(self, input, num_out, name, relu=True, reuse=None):
+        with tf.variable_scope(name, reuse=reuse) as scope:
             input_shape = input.get_shape()
             if input_shape.ndims == 4:
                 # The input is spatial. Vectorize it first.
@@ -259,8 +268,8 @@ class Network(object):
         return tf.nn.softmax(input, name)
         
     @layer
-    def batch_normalization(self, input, name, is_training, activation_fn=None, scale=True):
-        with tf.variable_scope(name) as scope:
+    def batch_normalization(self, input, name, is_training, activation_fn=None, scale=True, reuse=None):
+        with tf.variable_scope(name, reuse=reuse) as scope:
             output = slim.batch_norm(
                 input,
                 activation_fn=activation_fn,
@@ -282,8 +291,9 @@ class Network(object):
         conv_filter_width=3,
         num_layers=1, final_project=False,
         key_value=False, skip_connection=False,
-        weight_sharing=False):
-        with tf.variable_scope(name) as scope:
+        weight_sharing=False,
+        reuse=None):
+        with tf.variable_scope(name, reuse=reuse) as scope:
             # [c, e]
             class_embeddings = tf.get_variable("class_embeddings", dtype=tf.float32,
                                            shape=[num_classes, embedding_size])

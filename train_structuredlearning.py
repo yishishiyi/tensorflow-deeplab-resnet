@@ -34,7 +34,7 @@ POWER = 0.9
 RANDOM_SEED = 1234
 RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet_init.ckpt'
 SAVE_NUM_IMAGES = 1
-SAVE_PRED_EVERY = 1000
+SAVE_PRED_EVERY = 10
 SUMMARY_EVERY = 2
 SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
@@ -171,38 +171,32 @@ def main():
             IMG_MEAN,
             coord)
         image_batch, label_batch = reader.dequeue(args.batch_size)
-        val_image_batch, val_label_batch = tf.expand_dims(val_reader.image, dim=0), tf.expand_dims(val_reader.label, dim=0)
-        # val_image_batch, val_label_batch = val_reader.dequeue(args.batch_size) #(todo) why in evaluation code, it's not dequeue.
         print("image_batch", image_batch.get_shape().as_list())
         print("label_batch", label_batch.get_shape().as_list())
+        val_image_batch, val_label_batch = tf.expand_dims(val_reader.image, dim=0), tf.expand_dims(val_reader.label, dim=0)
 
     # Create network.
-    net = DeepLabResNetStructuredLearningModel({'data': image_batch}, is_training=args.is_training,
-                                               num_classes=args.num_classes, embedding_size=args.embedding_size,
-                                               ASPP=args.ASPP, CRN=args.CRN)
     # For a small batch size, it is better to keep
     # the statistics of the BN layers (running means and variances)
     # frozen, and to not update the values provided by the pre-trained model.
     # If is_training=True, the statistics will be updated during the training.
     # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
     # if they are presented in var_list of the optimiser definition.
+    net = DeepLabResNetStructuredLearningModel({'data': image_batch}, is_training=args.is_training,
+                                               num_classes=args.num_classes, embedding_size=args.embedding_size,
+                                               ASPP=args.ASPP, CRN=args.CRN)
+    val_net = DeepLabResNetStructuredLearningModel({'data': val_image_batch}, is_training=False, reuse=True,
+                                               num_classes=args.num_classes, embedding_size=args.embedding_size,
+                                               ASPP=args.ASPP, CRN=args.CRN)
+    # Predictions: ignoring all predictions with labels greater or equal than n_classes
+    raw_output = net.get_raw_output()
+    # Pixel-wise softmax loss.
+    loss = net.get_loss(raw_output, label_batch)
+    l2_losses = [args.weight_decay * tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'weights' in v.name]
+    reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
+    val_raw_output = val_net.get_raw_output()
+    val_loss = val_net.get_loss(val_raw_output, val_label_batch)
 
-    # Predictions.
-    if args.CRN:
-        crn_output = net.layers['crn']
-        print("crn_output", crn_output.get_shape().as_list())
-        with tf.variable_scope("crn", reuse=True):
-            class_embeddings = tf.get_variable("class_embeddings")  # reuse
-        output_shape = tf.shape(crn_output)
-        crn_output_reshaped = tf.reshape(crn_output, [-1, args.embedding_size])
-        print("crn_output_reshaped", crn_output_reshaped.get_shape().as_list())
-        raw_output = tf.matmul(crn_output_reshaped, tf.transpose(class_embeddings))
-        print("raw_output", raw_output.get_shape().as_list())
-        reshape_size = tf.concat([output_shape[0:3], tf.constant([args.num_classes], dtype=tf.int32)], axis=0, )
-        raw_output = tf.reshape(raw_output, reshape_size)
-        print("raw_output", raw_output.get_shape().as_list())
-    else:
-        raw_output = net.layers['fc1_voc12']
 
     # Which variables to load. Running means and variances are not trainable,
     # thus all_variables() should be restored.
@@ -215,35 +209,6 @@ def main():
     crn_trainable = [v for v in tf.trainable_variables() if 'crn' in v.name]
     assert (len(all_trainable) == len(fc_trainable) + len(conv_trainable))
     assert (len(fc_trainable) == len(fc_w_trainable) + len(fc_b_trainable))
-
-    # Predictions: ignoring all predictions with labels greater or equal than n_classes
-    raw_prediction = tf.reshape(raw_output, [-1, args.num_classes])
-    # tf.cast(tf.ceil(tf.shape(label_batch[1:3, ] / 8.0)), tf.int32)
-    label_proc = prepare_label(label_batch,tf.shape(raw_output)[1:3,], num_classes=args.num_classes,
-                               one_hot=False)  # [batch_size, h, w]
-    raw_gt = tf.reshape(label_proc, [-1, ])
-    indices = tf.squeeze(tf.where(tf.less_equal(raw_gt, args.num_classes - 1)), 1)
-    gt = tf.cast(tf.gather(raw_gt, indices), tf.int32)
-    prediction = tf.gather(raw_prediction, indices)
-    print("raw_prediction", raw_prediction.get_shape().as_list())
-    print("label_proc", label_proc.get_shape().as_list())
-    print("raw_gt", raw_gt.get_shape().as_list())
-    print("indices", indices.get_shape().as_list())
-    print("prediction", prediction.get_shape().as_list())
-    print("gt", gt.get_shape().as_list())
-    val_label_proc = prepare_label(val_label_batch, tf.stack(raw_output.get_shape()[1:3]), num_classes=args.num_classes,
-                               one_hot=False)  # [batch_size, h, w]
-    val_raw_gt = tf.reshape(val_label_proc, [-1, ])
-    val_indices = tf.squeeze(tf.where(tf.less_equal(val_raw_gt, args.num_classes - 1)), 1)
-    val_gt = tf.cast(tf.gather(val_raw_gt, val_indices), tf.int32)
-
-
-    # Pixel-wise softmax loss.
-    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=gt)
-    l2_losses = [args.weight_decay * tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'weights' in v.name]
-    reduced_loss = tf.reduce_mean(loss) + tf.add_n(l2_losses)
-    val_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=val_gt)
-    val_reduced_loss = tf.reduce_mean(val_loss) + tf.add_n(l2_losses)
 
     # Processed predictions: for visualisation.
     raw_output_up = tf.image.resize_bilinear(raw_output, tf.shape(image_batch)[1:3, ])
@@ -273,44 +238,41 @@ def main():
 
     train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b, train_op_crn)
 
+
     # Image summary.
     images_summary = tf.py_func(inv_preprocess, [image_batch, args.save_num_images, IMG_MEAN], tf.uint8)
     labels_summary = tf.py_func(decode_labels, [label_batch, args.save_num_images, args.num_classes], tf.uint8)
     preds_summary = tf.py_func(decode_labels, [pred, args.save_num_images, args.num_classes], tf.uint8)
-
     tf.summary.image('images',
                      tf.concat(axis=2, values=[images_summary, labels_summary, preds_summary]),
                      max_outputs=args.save_num_images)  # Concatenate row-wise.
     # Loss summary.
-    tf.summary.scalar('TRAIN/loss', loss)
-    tf.summary.scalar('TRAIN/loss', reduced_loss)
+    tf.summary.scalar('TRAIN/loss', tf.reduce_mean(loss))
+    tf.summary.scalar('TRAIN/loss_l2', reduced_loss)
     tf.summary.scalar('TRAIN/lr', learning_rate)
-
     # Tensor summary.
     tensor_to_summary = net.tensor_to_summary
     tensor_to_summary['raw_outputs'] = raw_output
-    tensor_to_summary['predictions'] = prediction
     for key, t in tensor_to_summary.items():
         tf.summary.histogram('SCORE/' + t.op.name + '/' + key + '/scores', t)
-
     # Activation summary.
     variables_to_summary = fc_w_trainable + fc_b_trainable + crn_trainable
     for v in variables_to_summary:
         tf.summary.histogram('ACT/' + v.op.name + '/activations', v)
         tf.summary.scalar('ACT/' + v.op.name + '/zero_fraction',
                       tf.nn.zero_fraction(v))
-
-    # validation summary, basic just loss summary
-    val_summaries = [tf.summary.scalar('TRAIN/loss', val_loss), tf.summary.scalar('TRAIN/loss', val_reduced_loss)]
-
     summary_op = tf.summary.merge_all()
-    val_summary_op = tf.summary.merge(val_summaries)
     summary_writer = tf.summary.FileWriter(args.snapshot_dir,
                                            graph=tf.get_default_graph())
+
+    # validation summary, basic just loss summary
     val_snapshot_dir = args.snapshot_dir + '/val'
     if not os.path.exists(val_snapshot_dir):
       os.makedirs(val_snapshot_dir)
+    val_summaries = [tf.summary.scalar('TRAIN/loss', tf.reduce_mean(val_loss))]
+    val_summary_op = tf.summary.merge(val_summaries)
     val_summary_writer = tf.summary.FileWriter(val_snapshot_dir)
+
 
     # Set up tf session and initialize variables.
     config = tf.ConfigProto()
@@ -341,10 +303,8 @@ def main():
                 [reduced_loss, image_batch, label_batch, pred, summary_op, train_op], feed_dict=feed_dict)
             summary_writer.add_summary(summary, step)
 
-            net.layers['data'] = val_image_batch
             _, _, val_summary = sess.run([val_image_batch, val_label_batch, val_summary_op], feed_dict=feed_dict)
             val_summary_writer.add_summary(val_summary, step)
-            net.layers['data'] = image_batch
         else:
             loss_value, _ = sess.run([reduced_loss, train_op], feed_dict=feed_dict)
         duration = time.time() - start_time
