@@ -22,8 +22,8 @@ IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32
 
 BATCH_SIZE = 1
 DATA_DIRECTORY = './data/VOC2012_Aug/VOCdevkit/VOC2012'
-DATA_LIST_PATH = './dataset/small_batch.txt'
-VAL_DATA_LIST_PATH = './dataset/val_small_batch.txt'
+DATA_LIST_PATH = './dataset/train.txt'
+VAL_DATA_LIST_PATH = './dataset/val.txt'
 IGNORE_LABEL = 255
 INPUT_SIZE = '321,321'
 LEARNING_RATE = 2.5e-4
@@ -34,9 +34,9 @@ POWER = 0.9
 RANDOM_SEED = 1234
 RESTORE_FROM = './ckpt/deeplab_resnet_tf/deeplab_resnet_init.ckpt'
 SAVE_NUM_IMAGES = 1
-SAVE_PRED_EVERY = 10
-SUMMARY_EVERY = 2
-SNAPSHOT_DIR = './snapshots/'
+SAVE_PRED_EVERY = 1000
+SUMMARY_EVERY = 20
+SNAPSHOT_DIR = './logs/snapshots'
 WEIGHT_DECAY = 0.0005
 GPU_ID = '0'
 EMBEDDING_SIZE = 512
