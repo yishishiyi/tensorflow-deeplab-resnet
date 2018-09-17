@@ -398,7 +398,10 @@ class DeepLabResNetStructuredLearningModel(Network):
          .conv(1, 1, 2048, 1, 1, biased=False, relu=False, name='res5c_branch2c', reuse=reuse)
          .batch_normalization(is_training=is_training, activation_fn=None, name='bn5c_branch2c', reuse=reuse))
 
-        embedding_size = self.embedding_size
+        if self.CRN:
+            embedding_size = self.embedding_size
+        else:
+            embedding_size = self.num_classes
         if self.ASPP:
             (self.feed('res5b_relu',
                        'bn5c_branch2c')

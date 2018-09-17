@@ -40,8 +40,8 @@ SNAPSHOT_DIR = './snapshots/'
 WEIGHT_DECAY = 0.0005
 GPU_ID = '0'
 EMBEDDING_SIZE = 512
-ASPP = True
-CRN = True
+ASPP = 1
+CRN = 1
 
 
 def get_arguments():
@@ -99,9 +99,9 @@ def get_arguments():
                         help="GPU id, -1 means cpu.")
     parser.add_argument("--embedding-size", type=int, default=EMBEDDING_SIZE,
                         help="embedding-size before refinement.")
-    parser.add_argument("--ASPP", type=bool, default=ASPP,
+    parser.add_argument("--ASPP", type=int, default=ASPP,
                         help="Whether use Atrous Spatial Pyramid Pooling")
-    parser.add_argument("--CRN", type=bool, default=CRN,
+    parser.add_argument("--CRN", type=int, default=CRN,
                         help="Wether use CRN to refine output")
 
     return parser.parse_args()
@@ -182,6 +182,7 @@ def main():
     # If is_training=True, the statistics will be updated during the training.
     # Note that is_training=False still updates BN parameters gamma (scale) and beta (offset)
     # if they are presented in var_list of the optimiser definition.
+    print("CRN", args.CRN)
     net = DeepLabResNetStructuredLearningModel({'data': image_batch}, is_training=args.is_training,
                                                num_classes=args.num_classes, embedding_size=args.embedding_size,
                                                ASPP=args.ASPP, CRN=args.CRN)
@@ -223,20 +224,23 @@ def main():
     opt_conv = tf.train.MomentumOptimizer(learning_rate, args.momentum)
     opt_fc_w = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
     opt_fc_b = tf.train.MomentumOptimizer(learning_rate * 20.0, args.momentum)
-    opt_crn = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
 
     grads = tf.gradients(reduced_loss, conv_trainable + fc_w_trainable + fc_b_trainable + crn_trainable)
     grads_conv = grads[:len(conv_trainable)]
     grads_fc_w = grads[len(conv_trainable): (len(conv_trainable) + len(fc_w_trainable))]
     grads_fc_b = grads[(len(conv_trainable) + len(fc_w_trainable)): (len(conv_trainable) + len(fc_w_trainable) + len(fc_b_trainable))]
-    grads_opt_crn = grads[(len(conv_trainable) + len(fc_w_trainable) + len(fc_b_trainable)):]
 
     train_op_conv = opt_conv.apply_gradients(zip(grads_conv, conv_trainable))
     train_op_fc_w = opt_fc_w.apply_gradients(zip(grads_fc_w, fc_w_trainable))
     train_op_fc_b = opt_fc_b.apply_gradients(zip(grads_fc_b, fc_b_trainable))
-    train_op_crn = opt_crn.apply_gradients(zip(grads_opt_crn, crn_trainable))
 
-    train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b, train_op_crn)
+    if args.CRN:
+        opt_crn = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
+        grads_opt_crn = grads[(len(conv_trainable) + len(fc_w_trainable) + len(fc_b_trainable)):]
+        train_op_crn = opt_crn.apply_gradients(zip(grads_opt_crn, crn_trainable))
+        train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b, train_op_crn)
+    else:
+        train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b)
 
 
     # Image summary.
