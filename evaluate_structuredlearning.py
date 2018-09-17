@@ -22,8 +22,8 @@ IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32
 DATA_DIRECTORY = './data/VOC2012_Aug/VOCdevkit/VOC2012'
 DATA_LIST_PATH = './dataset/val.txt'
 IGNORE_LABEL = 255
-NUM_CLASSES = 1449
-NUM_STEPS = 10  # Number of images in the validation set.
+NUM_CLASSES = 21
+NUM_STEPS = 1449  # Number of images in the validation set.
 SNAPSHOT_DIR = './logs/snapshots/'
 RESTORE_FROM = './logs/snapshots/model.ckpt-20001'
 GPU_ID = '0'
