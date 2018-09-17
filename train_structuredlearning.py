@@ -42,6 +42,8 @@ GPU_ID = '0'
 EMBEDDING_SIZE = 512
 ASPP = 1
 CRN = 1
+FC_LR_FACTOR = 10.0
+CRN_LR_FACTOR = 10.0
 
 
 def get_arguments():
@@ -103,6 +105,10 @@ def get_arguments():
                         help="Whether use Atrous Spatial Pyramid Pooling")
     parser.add_argument("--CRN", type=int, default=CRN,
                         help="Wether use CRN to refine output")
+    parser.add_argument("--fc-lr-factor", type=float, default=FC_LR_FACTOR,
+                        help="learning rate factor of fc layer vars")
+    parser.add_argument("--crn-lr-factor", type=float, default=CRN_LR_FACTOR,
+                        help="learning rate factor of crn layer vars")
 
     return parser.parse_args()
 
@@ -222,8 +228,8 @@ def main():
     learning_rate = tf.scalar_mul(base_lr, tf.pow((1 - step_ph / args.num_steps), args.power))
 
     opt_conv = tf.train.MomentumOptimizer(learning_rate, args.momentum)
-    opt_fc_w = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
-    opt_fc_b = tf.train.MomentumOptimizer(learning_rate * 20.0, args.momentum)
+    opt_fc_w = tf.train.MomentumOptimizer(learning_rate * args.fc_lr_factor, args.momentum)
+    opt_fc_b = tf.train.MomentumOptimizer(learning_rate * args.fc_lr_factor *2.0, args.momentum)
 
     grads = tf.gradients(reduced_loss, conv_trainable + fc_w_trainable + fc_b_trainable + crn_trainable)
     grads_conv = grads[:len(conv_trainable)]
@@ -235,7 +241,7 @@ def main():
     train_op_fc_b = opt_fc_b.apply_gradients(zip(grads_fc_b, fc_b_trainable))
 
     if args.CRN:
-        opt_crn = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
+        opt_crn = tf.train.MomentumOptimizer(learning_rate * args.crn_lr_factor, args.momentum)
         grads_opt_crn = grads[(len(conv_trainable) + len(fc_w_trainable) + len(fc_b_trainable)):]
         train_op_crn = opt_crn.apply_gradients(zip(grads_opt_crn, crn_trainable))
         train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b, train_op_crn)
