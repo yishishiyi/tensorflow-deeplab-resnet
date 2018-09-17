@@ -16,7 +16,7 @@ import time
 import tensorflow as tf
 import numpy as np
 
-from deeplab_resnet import DeepLabResNetStructuredLearningModel, ImageReader, decode_labels, inv_preprocess, prepare_label
+from deeplab_resnet import DeepLabResNetStructuredLearningModel, ImageReader, decode_labels, inv_preprocess, prepare_label, print_options
 
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
@@ -146,6 +146,7 @@ def load(saver, sess, ckpt_path):
 def main():
     """Create the model and start the training."""
     args = get_arguments()
+    print_options(args, 'train_args.txt')
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
     h, w = map(int, args.input_size.split(','))
@@ -272,16 +273,19 @@ def main():
         tf.summary.scalar('ACT/' + v.op.name + '/zero_fraction',
                       tf.nn.zero_fraction(v))
     summary_op = tf.summary.merge_all()
-    summary_writer = tf.summary.FileWriter(args.snapshot_dir,
+    train_summary_dir = os.path.join(args.snapshot_dir, 'summary', 'train')
+    if not os.path.exists(train_summary_dir):
+      os.makedirs(train_summary_dir)
+    summary_writer = tf.summary.FileWriter(train_summary_dir,
                                            graph=tf.get_default_graph())
 
     # validation summary, basic just loss summary
-    val_snapshot_dir = args.snapshot_dir + '/val'
-    if not os.path.exists(val_snapshot_dir):
-      os.makedirs(val_snapshot_dir)
+    val_summary_dir = os.path.join(args.snapshot_dir, 'summary', 'val')
+    if not os.path.exists(val_summary_dir):
+      os.makedirs(val_summary_dir)
     val_summaries = [tf.summary.scalar('TRAIN/loss', tf.reduce_mean(val_loss))]
     val_summary_op = tf.summary.merge(val_summaries)
-    val_summary_writer = tf.summary.FileWriter(val_snapshot_dir)
+    val_summary_writer = tf.summary.FileWriter(val_summary_dir)
 
 
     # Set up tf session and initialize variables.

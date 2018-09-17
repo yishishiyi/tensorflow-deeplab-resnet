@@ -15,7 +15,7 @@ import time
 import tensorflow as tf
 import numpy as np
 
-from deeplab_resnet import DeepLabResNetStructuredLearningModel, ImageReader, prepare_label
+from deeplab_resnet import DeepLabResNetStructuredLearningModel, ImageReader, prepare_label, print_options
 
 IMG_MEAN = np.array((104.00698793, 116.66876762, 122.67891434), dtype=np.float32)
 
@@ -24,8 +24,9 @@ DATA_LIST_PATH = './dataset/val.txt'
 IGNORE_LABEL = 255
 NUM_CLASSES = 21
 NUM_STEPS = 10  # Number of images in the validation set.
+SNAPSHOT_DIR = './logs/hh/'
 RESTORE_FROM = './logs/hh/model.ckpt-40'
-GPU_ID = '-1'
+GPU_ID = '0'
 EMBEDDING_SIZE = 512
 ASPP = 1
 CRN = 1
@@ -47,6 +48,8 @@ def get_arguments():
                         help="Number of classes to predict (including background).")
     parser.add_argument("--num-steps", type=int, default=NUM_STEPS,
                         help="Number of images in the validation set.")
+    parser.add_argument("--snapshot-dir", type=str, default=SNAPSHOT_DIR,
+                        help="Where to save snapshots of the model.")
     parser.add_argument("--restore-from", type=str, default=RESTORE_FROM,
                         help="Where restore model parameters from.")
     parser.add_argument("--gpu-id", type=str, default=GPU_ID,
@@ -75,6 +78,7 @@ def load(saver, sess, ckpt_path):
 def main():
     """Create the model and start the evaluation process."""
     args = get_arguments()
+    print_options(args, 'eval_args.txt')
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
     # Create queue coordinator.

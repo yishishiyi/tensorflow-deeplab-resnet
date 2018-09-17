@@ -1,6 +1,7 @@
 from PIL import Image
 import numpy as np
 import tensorflow as tf
+import os
 
 # colour map
 label_colours = [(0,0,0)
@@ -76,3 +77,24 @@ def inv_preprocess(imgs, num_images, img_mean):
     for i in range(num_images):
         outputs[i] = (imgs[i] + img_mean)[:, :, ::-1].astype(np.uint8)
     return outputs
+
+
+def print_options(args, name):
+    message = ''
+    message += '----------------- Options ---------------\n'
+    for k, v in sorted(vars(args).items()):
+        comment = ''
+        message += '{:>25}: {:<30}{}\n'.format(str(k), str(v), comment)
+    message += '----------------- End -------------------'
+    print(message)
+
+    # save to the disk
+    args_dir = os.path.join(args.snapshot_dir, 'args')
+    if not os.path.exists(args_dir):
+      os.makedirs(args_dir)
+    file_name = os.path.join(args_dir, name)
+    with open(file_name, 'wt') as opt_file:
+        opt_file.write(message)
+        opt_file.write('\n')
+
+
